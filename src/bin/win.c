@@ -158,15 +158,57 @@ static Tab_Item* tab_item_new(Tabs *tabs, Term_Container *child);
 static void _tabs_refresh(Tabs *tabs);
 
 
+static Eina_Bool
+_dbg(void *data)
+{
+   Win *wn = data;
+   Evas_Object *base, *o;
+   base = win_base_get(wn);
+   o = edje_object_part_swallow_get(base, "terminology.content");
+   DBG("in %p: o:%p", base, o);
+   return ECORE_CALLBACK_RENEW;
+}
+
+#define _DBG(Wn)                                                             \
+{                                                                            \
+   Evas_Object *_base, *_o, *_o2;                                            \
+   Eina_List *_l;                                                            \
+   _base = win_base_get(Wn);                                                 \
+   _o = edje_object_part_swallow_get(_base, "terminology.content");          \
+   DBG("in %p: o:%p as terminology.content", _base, _o);                     \
+   if (_base != NULL) {                                                      \
+        const char *_part;                                                   \
+        Eina_List *_l2;                                                      \
+        _l = edje_object_access_part_list_get(_base);                        \
+        DBG("len(l):%d", eina_list_count(_l));                               \
+        EINA_LIST_FOREACH(_l, _l2, _part) {                                  \
+             _o2 = edje_object_part_swallow_get(_base, _part);               \
+             DBG("in %p: o:%p as %s", _base, _o2, _part);                    \
+        }                                                                    \
+   }                                                                         \
+}
+
+#define _edje_object_part_unswallow(_p, _o) \
+   do { \
+        DBG("unswallowing %p from %p", _o, _p); \
+        edje_object_part_unswallow(_p, _o); \
+   } while (0)
+
+#define _edje_object_part_swallow(_p, _s, _o) \
+   do { \
+        DBG("swallowing %p in %p as %s", _o, _p, _s); \
+        edje_object_part_swallow(_p, _s, _o); \
+   } while (0)
 /* {{{ Solo */
 
 static Evas_Object *
-_solo_get_evas_object(Term_Container *container)
+_solo_get_evas_object(Term_Container *tc)
 {
    Solo *solo;
-   assert (container->type == TERM_CONTAINER_TYPE_SOLO);
-   solo = (Solo*)container;
+   assert (tc->type == TERM_CONTAINER_TYPE_SOLO);
+   solo = (Solo*) tc;
 
+   DBG("tc:%p o:%p", tc, solo->term->bg);
    return solo->term->bg;
 }
 
@@ -222,6 +264,7 @@ _solo_size_eval(Term_Container *container, Sizeinfo *info)
 static void
 _solo_close(Term_Container *tc, Term_Container *child EINA_UNUSED)
 {
+   DBG("tc:%p", tc);
    tc->parent->close(tc->parent, tc);
 
    eina_stringshare_del(tc->title);
@@ -241,6 +284,7 @@ static void
 _solo_split(Term_Container *tc, Term_Container *child EINA_UNUSED,
             const char *cmd, Eina_Bool is_horizontal)
 {
+   ERR("tc:%p split", tc);
    tc->parent->split(tc->parent, tc, cmd, is_horizontal);
 }
 
@@ -464,6 +508,13 @@ _cb_win_focus_in(void *data,
      _term_focus(term);
    else
      tc->focus(tc, tc);
+
+     {
+        Evas_Object *base, *o;
+        base = win_base_get(wn);
+        o = edje_object_part_swallow_get(base, "terminology.content");
+        DBG("in %p: o:%p", base, o);
+     }
 }
 
 static void
@@ -789,23 +840,27 @@ _win_swallow(Term_Container *tc, Term_Container *orig,
    wn = (Win*) tc;
    base = win_base_get(wn);
 
-   if (orig)
-     {
-        o = edje_object_part_swallow_get(base, "terminology.content");
-        edje_object_part_unswallow(base, o);
-        evas_object_hide(o);
-        o = orig->get_evas_object(orig);
-        evas_object_geometry_get(o, &x, &y, &w, &h);
-     }
+   DBG("tc:%p orig:%p new_child:%p", tc, orig, new_child);
+
+   o = edje_object_part_swallow_get(base, "terminology.content");
+   _edje_object_part_unswallow(base, o);
+   evas_object_geometry_get(o, &x, &y, &w, &h);
+
    o = new_child->get_evas_object(new_child);
-   edje_object_part_swallow(base, "terminology.content", o);
-   if (orig)
-     evas_object_geometry_set(o, x, y, w, h);
+   DBG("swallowing %p in %p", o, base);
+   _edje_object_part_swallow(base, "terminology.content", o);
+
    evas_object_show(o);
    new_child->parent = tc;
    wn->child = new_child;
    if (tc->is_focused)
      new_child->focus(new_child, tc);
+
+     {
+        base = win_base_get(wn);
+        o = edje_object_part_swallow_get(base, "terminology.content");
+        DBG("in %p: o:%p", base, o);
+     }
 }
 
 static void
@@ -893,7 +948,6 @@ _win_split(Term_Container *tc, Term_Container *child, const char *cmd,
    Term *tm_new, *tm;
    Term_Container *tc_split, *tc_solo_new;
    Win *wn;
-   Evas_Object *obj_split;
    char buf[PATH_MAX], *wdir = NULL;
 
    assert (tc->type == TERM_CONTAINER_TYPE_WIN);
@@ -910,12 +964,8 @@ _win_split(Term_Container *tc, Term_Container *child, const char *cmd,
 
    tc_split = _split_new(child, tc_solo_new, is_horizontal);
 
-   obj_split = tc_split->get_evas_object(tc_split);
-
    tc_split->is_focused = tc->is_focused;
    tc->swallow(tc, child, tc_split);
-
-   evas_object_show(obj_split);
 }
 
 static void
@@ -1025,9 +1075,13 @@ main_close(Evas_Object *win, Evas_Object *term)
    wn->terms = eina_list_remove(wn->terms, tm);
    tc = tm->container;
 
+   DBG("tc:%p", tc);
    tc->close(tc, tc);
 
+   _DBG(wn);
    term_unref(tm);
+
+   _DBG(wn);
 }
 
 /* }}} */
@@ -1091,6 +1145,7 @@ _split_get_evas_object(Term_Container *tc)
    assert (tc->type == TERM_CONTAINER_TYPE_SPLIT);
    split = (Split*) tc;
 
+   DBG("tc:%p o:%p", tc, split->panes);
    return split->panes;
 }
 
@@ -1183,6 +1238,8 @@ _split_swallow(Term_Container *tc, Term_Container *orig,
    o = orig->get_evas_object(orig);
    evas_object_geometry_get(o, &x, &y, &w, &h);
    evas_object_hide(o);
+   DBG("x:%d y:%d w:%d h:%d", x, y, w, h);
+   DBG("tc:%p orig:%p new_child:%p", tc, orig, new_child);
 
    if (orig == split->last_focus)
      split->last_focus = new_child;
@@ -1201,7 +1258,7 @@ _split_swallow(Term_Container *tc, Term_Container *orig,
         split->tc2 = new_child;
      }
    new_child->parent = tc;
-   evas_object_geometry_set(o, x, y, w, h);
+   //evas_object_geometry_set(o, x, y, w, h);
    evas_object_show(o);
    evas_object_show(split->panes);
 
@@ -1257,10 +1314,18 @@ _split_close(Term_Container *tc, Term_Container *child)
    assert (tc->type == TERM_CONTAINER_TYPE_SPLIT);
    split = (Split*) tc;
 
-   elm_object_part_content_unset(split->panes, PANES_TOP);
-   elm_object_part_content_unset(split->panes, PANES_BOTTOM);
+   Evas_Object *top, *bottom;
+   top = elm_object_part_content_unset(split->panes, PANES_TOP);
+   bottom = elm_object_part_content_unset(split->panes, PANES_BOTTOM);
+   DBG("top:%p vs %p, bottom:%p vs %p",
+       top, split->tc1->get_evas_object(split->tc1),
+       bottom, split->tc2->get_evas_object(split->tc2));
+   evas_object_hide(top);
+   evas_object_hide(bottom);
 
+   DBG("tc:%p child:%p tc1:%p tc2:%p", tc, child, split->tc1, split->tc2);
    parent = tc->parent;
+   assert(child == split->tc1 || child == split->tc2);
    other_child = (child == split->tc1) ? split->tc2 : split->tc1;
    parent->swallow(parent, tc, other_child);
 
@@ -1592,7 +1657,7 @@ _tabbar_fill(Tabs *tabs)
         elm_box_homogeneous_set(o, EINA_TRUE);
         evas_object_size_hint_weight_set(o, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
         evas_object_size_hint_fill_set(o, EVAS_HINT_FILL, EVAS_HINT_FILL);
-        edje_object_part_swallow(term->bg, "terminology.tabl.content", o);
+        _edje_object_part_swallow(term->bg, "terminology.tabl.content", o);
         evas_object_show(o);
      }
    if (i < (n - 1))
@@ -1602,7 +1667,7 @@ _tabbar_fill(Tabs *tabs)
         elm_box_homogeneous_set(o, EINA_TRUE);
         evas_object_size_hint_weight_set(o, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
         evas_object_size_hint_fill_set(o, EVAS_HINT_FILL, EVAS_HINT_FILL);
-        edje_object_part_swallow(term->bg, "terminology.tabr.content", o);
+        _edje_object_part_swallow(term->bg, "terminology.tabr.content", o);
         evas_object_show(o);
      }
    EINA_LIST_FOREACH(tabs->tabs, l, tab_item)
@@ -1723,7 +1788,7 @@ _tabs_restore(Tabs *tabs)
 #if (EVAS_VERSION_MAJOR > 1) || (EVAS_VERSION_MINOR >= 8)
              evas_object_image_source_visible_set(term->sel, EINA_TRUE);
 #endif
-             edje_object_part_swallow(term->bg, "terminology.content", term->base);
+             _edje_object_part_swallow(term->bg, "terminology.content", term->base);
              term->unswallowed = EINA_FALSE;
              evas_object_show(term->base);
           }
@@ -1847,7 +1912,7 @@ _cb_tab_selector_show(Tabs *tabs, Tab_Item *to_item)
         term = solo->term;
         _tabbar_clear(term);
 
-        edje_object_part_unswallow(term->bg, term->base);
+        _edje_object_part_unswallow(term->bg, term->base);
         term->unswallowed = EINA_TRUE;
         img = evas_object_image_filled_add(evas_object_evas_get(wn->win));
         o = term->base;
@@ -1867,7 +1932,7 @@ _cb_tab_selector_show(Tabs *tabs, Tab_Item *to_item)
                                                  is_selected,
                                                  missed_bell, wn->config);
      }
-   edje_object_part_swallow(tabs->selector_bg, "terminology.content",
+   _edje_object_part_swallow(tabs->selector_bg, "terminology.content",
                             tabs->selector);
 
    evas_object_show(tabs->selector);
@@ -2478,7 +2543,7 @@ _tabs_refresh(Tabs *tabs)
      }
    elm_coords_finger_size_adjust(1, &w, 1, &h);
    evas_object_size_hint_min_set(term->tabcount_spacer, w, h);
-   edje_object_part_swallow(term->bg, "terminology.tabcount.control",
+   _edje_object_part_swallow(term->bg, "terminology.tabcount.control",
                             term->tabcount_spacer);
    edje_object_part_text_set(term->bg, "terminology.tabcount.label", buf);
    edje_object_part_text_set(term->bg, "terminology.tabmissed.label", bufmissed);
@@ -2497,7 +2562,7 @@ _tabs_refresh(Tabs *tabs)
              evas_object_color_set(term->tab_spacer, 0, 0, 0, 0);
              elm_coords_finger_size_adjust(1, &w, 1, &h);
              evas_object_size_hint_min_set(term->tab_spacer, w, h);
-             edje_object_part_swallow(term->bg, "terminology.tab", term->tab_spacer);
+             _edje_object_part_swallow(term->bg, "terminology.tab", term->tab_spacer);
              edje_object_part_drag_value_set(term->bg, "terminology.tabl", v1, 0.0);
              edje_object_part_drag_value_set(term->bg, "terminology.tabr", v2, 0.0);
              edje_object_part_text_set(term->bg, "terminology.tab.title",
@@ -2854,7 +2919,7 @@ _popmedia_show(Term *term, const char *src, Media_Type type)
    term->popmedia_deleted = EINA_FALSE;
    evas_object_smart_callback_add(o, "loop", _cb_media_loop, term);
    evas_object_event_callback_add(o, EVAS_CALLBACK_DEL, _cb_popmedia_del, term);
-   edje_object_part_swallow(term->bg, "terminology.popmedia", o);
+   _edje_object_part_swallow(term->bg, "terminology.popmedia", o);
    evas_object_show(o);
    term->poptype = type;
    switch (type)
@@ -3392,7 +3457,7 @@ _cb_cmd_hints_changed(void *data, Evas *e EINA_UNUSED,
    if (wn->cmdbox)
      {
         evas_object_show(wn->cmdbox);
-        edje_object_part_swallow(wn->base, "terminology.cmdbox", wn->cmdbox);
+        _edje_object_part_swallow(wn->base, "terminology.cmdbox", wn->cmdbox);
      }
 }
 
@@ -3424,7 +3489,7 @@ _cb_cmdbox(void *data,
         evas_object_smart_callback_add(o, "changed,user", _cb_cmd_changed, wn);
         evas_object_event_callback_add(o, EVAS_CALLBACK_CHANGED_SIZE_HINTS,
                                        _cb_cmd_hints_changed, wn);
-        edje_object_part_swallow(wn->base, "terminology.cmdbox", o);
+        _edje_object_part_swallow(wn->base, "terminology.cmdbox", o);
      }
    edje_object_signal_emit(term->wn->base, "cmdbox,show", "terminology");
    elm_object_focus_set(term->termio, EINA_FALSE);
@@ -3483,7 +3548,7 @@ _term_media_update(Term *term, const Config *config)
                                     MEDIA_BG, type);
         evas_object_event_callback_add(o, EVAS_CALLBACK_DEL,
                                        _cb_media_del, term);
-        edje_object_part_swallow(term->base, "terminology.background", o);
+        _edje_object_part_swallow(term->base, "terminology.background", o);
         evas_object_show(o);
         term->mediatype = type;
         switch (type)
@@ -3637,11 +3702,29 @@ _term_free(Term *term)
      }
    term->popmedia = NULL;
    term->popmedia_deleted = EINA_FALSE;
+   _DBG(term->wn);
    evas_object_del(term->termio);
+   _DBG(term->wn);
    term->termio = NULL;
+
+   _edje_object_part_unswallow(term->bg, term->base);
+   DBG("del:%p (base:%p)", term->bg, term->base);
    evas_object_del(term->base);
    term->base = NULL;
+   _DBG(term->wn);
+     {
+        const char *_part;
+        Eina_List *_l2, *_l;
+        Evas_Object *_o2;
+        _l = edje_object_access_part_list_get(term->bg);
+        DBG("len(l):%d", eina_list_count(_l));
+        EINA_LIST_FOREACH(_l, _l2, _part) {
+             _o2 = edje_object_part_swallow_get(term->bg, _part);
+             DBG("in %p: o:%p as %s", term->bg, _o2, _part);
+        }
+     }
    evas_object_del(term->bg);
+   _DBG(term->wn);
    term->bg = NULL;
    if (term->tabcount_spacer)
      {
@@ -3687,12 +3770,12 @@ _term_bg_config(Term *term)
                                    _cb_tabcount_prev, term);
    edje_object_signal_callback_add(term->bg, "tabcount,next", "terminology",
                                    _cb_tabcount_next, term);
-   edje_object_part_swallow(term->base, "terminology.content", term->termio);
-   edje_object_part_swallow(term->bg, "terminology.content", term->base);
-   edje_object_part_swallow(term->bg, "terminology.miniview", term->miniview);
+   _edje_object_part_swallow(term->base, "terminology.content", term->termio);
+   _edje_object_part_swallow(term->bg, "terminology.content", term->base);
+   _edje_object_part_swallow(term->bg, "terminology.miniview", term->miniview);
    if (term->popmedia)
      {
-        edje_object_part_swallow(term->bg, "terminology.popmedia", term->popmedia);
+        _edje_object_part_swallow(term->bg, "terminology.popmedia", term->popmedia);
         switch (term->poptype)
           {
            case MEDIA_TYPE_IMG:
@@ -3713,7 +3796,7 @@ _term_bg_config(Term *term)
      }
    if (term->media)
      {
-        edje_object_part_swallow(term->base, "terminology.background", term->media);
+        _edje_object_part_swallow(term->base, "terminology.background", term->media);
         switch (term->mediatype)
           {
            case MEDIA_TYPE_IMG:
@@ -3761,7 +3844,7 @@ _cb_tabregion_change(void *data, Evas *e EINA_UNUSED, Evas_Object *obj,
 
    evas_object_geometry_get(obj, NULL, NULL, &w, &h);
    evas_object_size_hint_min_set(term->tab_region_base, w, h);
-   edje_object_part_swallow(term->base, "terminology.tabregion",
+   _edje_object_part_swallow(term->base, "terminology.tabregion",
                             term->tab_region_base);
 }
 
@@ -3775,11 +3858,11 @@ _term_tabregion_setup(Term *term)
    evas_object_color_set(o, 0, 0, 0, 0);
    evas_object_event_callback_add(o, EVAS_CALLBACK_MOVE, _cb_tabregion_change, term);
    evas_object_event_callback_add(o, EVAS_CALLBACK_RESIZE, _cb_tabregion_change, term);
-   edje_object_part_swallow(term->bg, "terminology.tabregion", o);
+   _edje_object_part_swallow(term->bg, "terminology.tabregion", o);
 
    term->tab_region_base = o = evas_object_rectangle_add(evas_object_evas_get(term->bg));
    evas_object_color_set(o, 0, 0, 0, 0);
-   edje_object_part_swallow(term->base, "terminology.tabregion", o);
+   _edje_object_part_swallow(term->base, "terminology.tabregion", o);
 }
 
 Eina_Bool
@@ -3885,7 +3968,6 @@ term_unref(Term *term)
      }
 }
 
-
 Term *
 term_new(Win *wn, Config *config, const char *cmd,
          Eina_Bool login_shell, const char *cd,
@@ -3908,6 +3990,7 @@ term_new(Win *wn, Config *config, const char *cmd,
         _win_log_dom = eina_log_domain_register("win", NULL);
         if (_win_log_dom < 0)
           EINA_LOG_CRIT("Could not create logging domain '%s'.", "win");
+        ecore_timer_add(5.0, _dbg, wn);
      }
    termpty_init();
    miniview_init();
@@ -3978,9 +4061,9 @@ term_new(Win *wn, Config *config, const char *cmd,
    evas_object_size_hint_fill_set(o, 0, EVAS_HINT_FILL);
    evas_object_event_callback_add(o, EVAS_CALLBACK_CHANGED_SIZE_HINTS,
                                   _cb_size_hint, term);
-   edje_object_part_swallow(term->base, "terminology.content", o);
-   edje_object_part_swallow(term->bg, "terminology.content", term->base);
-   edje_object_part_swallow(term->bg, "terminology.miniview", term->miniview);
+   _edje_object_part_swallow(term->base, "terminology.content", o);
+   _edje_object_part_swallow(term->bg, "terminology.content", term->base);
+   _edje_object_part_swallow(term->bg, "terminology.miniview", term->miniview);
    evas_object_smart_callback_add(o, "options", _cb_options, term);
    evas_object_smart_callback_add(o, "exited", _cb_exited, term);
    evas_object_smart_callback_add(o, "bell", _cb_bell, term);

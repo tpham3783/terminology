@@ -115,6 +115,11 @@ static void _take_selection_text(Termio *sd, Elm_Sel_Type type, const char *text
 static void _smart_xy_to_cursor(Termio *sd, Evas_Coord x, Evas_Coord y, int *cx, int *cy);
 static Eina_Bool _mouse_in_selection(Termio *sd, int cx, int cy);
 
+#define _edje_object_part_swallow(_p, _s, _o) \
+   do { \
+        DBG("swallowing %p in %p as %s", _o, _p, _s); \
+        edje_object_part_swallow(_p, _s, _o); \
+   } while (0)
 
 /* {{{ Helpers */
 
@@ -676,8 +681,8 @@ termio_config_set(Evas_Object *obj, Config *config)
 
    theme_apply(sd->sel.theme, config, "terminology/selection");
    theme_auto_reload_enable(sd->sel.theme);
-   edje_object_part_swallow(sd->sel.theme, "terminology.top_left", sd->sel.top);
-   edje_object_part_swallow(sd->sel.theme, "terminology.bottom_right", sd->sel.bottom);
+   _edje_object_part_swallow(sd->sel.theme, "terminology.top_left", sd->sel.top);
+   _edje_object_part_swallow(sd->sel.theme, "terminology.bottom_right", sd->sel.bottom);
 }
 
 /* }}} */
@@ -5203,6 +5208,7 @@ _smart_resize(Evas_Object *obj, Evas_Coord w, Evas_Coord h)
 
    EINA_SAFETY_ON_NULL_RETURN(sd);
    evas_object_geometry_get(obj, NULL, NULL, &ow, &oh);
+   ERR("resize %p w:%d h:%d", sd->term, w, h);
    if ((ow == w) && (oh == h)) return;
    evas_object_smart_changed(obj);
    if (!sd->delayed_size_timer)
@@ -5311,6 +5317,38 @@ _smart_pty_cancel_sel(void *data)
 static void
 _smart_pty_exited(void *data)
 {
+   Termio *sd = evas_object_smart_data_get(data);
+   if (sd->event)
+     {
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_DOWN,
+                                       _smart_cb_mouse_down);
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_UP,
+                                       _smart_cb_mouse_up);
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_MOVE,
+                                       _smart_cb_mouse_move);
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_IN,
+                                       _smart_cb_mouse_in);
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_OUT,
+                                       _smart_cb_mouse_out);
+        evas_object_event_callback_del(sd->event, EVAS_CALLBACK_MOUSE_WHEEL,
+                                       _smart_cb_mouse_wheel);
+
+        evas_object_del(sd->event);
+        sd->event = NULL;
+     }
+   if (sd->self)
+     {
+        evas_object_event_callback_del(sd->self, EVAS_CALLBACK_KEY_DOWN,
+                                       _smart_cb_key_down);
+        evas_object_event_callback_del(sd->self, EVAS_CALLBACK_KEY_UP,
+                                       _smart_cb_key_up);
+        evas_object_event_callback_del(sd->self, EVAS_CALLBACK_FOCUS_IN,
+                                       _smart_cb_focus_in);
+        evas_object_event_callback_del(sd->self, EVAS_CALLBACK_FOCUS_OUT,
+                                       _smart_cb_focus_out);
+        sd->self = NULL;
+     }
+
    evas_object_smart_callback_call(data, "exited", NULL);
 }
 
