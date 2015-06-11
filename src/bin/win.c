@@ -30,13 +30,13 @@ int _win_log_dom = -1;
 #define INF(...)      EINA_LOG_DOM_INFO(_win_log_dom, __VA_ARGS__)
 #define DBG(...)      EINA_LOG_DOM_DBG(_win_log_dom, __VA_ARGS__)
 
-#if (ELM_VERSION_MAJOR == 1) && (ELM_VERSION_MINOR < 8)
+//#if (ELM_VERSION_MAJOR == 1) && (ELM_VERSION_MINOR < 8)
   #define PANES_TOP "left"
   #define PANES_BOTTOM "right"
-#else
-  #define PANES_TOP "top"
-  #define PANES_BOTTOM "bottom"
-#endif
+//#else
+//  #define PANES_TOP "top"
+//  #define PANES_BOTTOM "bottom"
+//#endif
 
 /* {{{ Structs */
 
@@ -169,23 +169,55 @@ _dbg(void *data)
    return ECORE_CALLBACK_RENEW;
 }
 
+void tcdbg(Term_Container *tc)
+{
+   Win *win;
+   Split *split;
+   Solo *solo;
+   Tabs *tabs;
+
+   switch (tc->type)
+     {
+      case TERM_CONTAINER_TYPE_SOLO:
+         solo = (Solo *) tc;
+         DBG("solo tc:%p o:%p term:%p", tc, solo->term->bg, solo->term);
+         break;
+      case TERM_CONTAINER_TYPE_SPLIT:
+         split = (Split *) tc;
+         DBG("split tc:%p split->tc1:%p split->tc2:%p panes:%p top:%p|%p bottom:%p|%p",
+             tc, split->tc1, split->tc2, split->panes,
+             elm_object_part_content_get(split->panes, PANES_TOP),
+             edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                          "elm.swallow."PANES_TOP),
+             elm_object_part_content_get(split->panes, PANES_BOTTOM),
+             edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                          "elm.swallow."PANES_BOTTOM));
+         assert(elm_object_part_content_get(split->panes, PANES_TOP) != NULL);
+         assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                          "elm.swallow."PANES_TOP) != NULL);
+         assert(elm_object_part_content_get(split->panes, PANES_BOTTOM) != NULL);
+         assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                          "elm.swallow."PANES_BOTTOM) != NULL);
+         tcdbg(split->tc1);
+         tcdbg(split->tc2);
+         break;
+      case TERM_CONTAINER_TYPE_TABS:
+         tabs = (Tabs *) tc;
+         DBG("tabs tc:%p %d", tc, eina_list_count(tabs->tabs));
+         break;
+      case TERM_CONTAINER_TYPE_WIN:
+         win = (Win *) tc;
+         DBG("win tc:%p child:%p", tc, win->child);
+         assert(edje_object_part_swallow_get(win->base, "terminology.content") != NULL);
+         tcdbg(win->child);
+         break;
+      case TERM_CONTAINER_TYPE_UNKNOWN:
+         DBG("tc:%p UNKNOWN", tc);
+     }
+}
 #define _DBG(Wn)                                                             \
 {                                                                            \
-   Evas_Object *_base, *_o, *_o2;                                            \
-   Eina_List *_l;                                                            \
-   _base = win_base_get(Wn);                                                 \
-   _o = edje_object_part_swallow_get(_base, "terminology.content");          \
-   DBG("in %p: o:%p as terminology.content", _base, _o);                     \
-   if (_base != NULL) {                                                      \
-        const char *_part;                                                   \
-        Eina_List *_l2;                                                      \
-        _l = edje_object_access_part_list_get(_base);                        \
-        DBG("len(l):%d", eina_list_count(_l));                               \
-        EINA_LIST_FOREACH(_l, _l2, _part) {                                  \
-             _o2 = edje_object_part_swallow_get(_base, _part);               \
-             DBG("in %p: o:%p as %s", _base, _o2, _part);                    \
-        }                                                                    \
-   }                                                                         \
+   tcdbg(&Wn->tc);                                                           \
 }
 
 #define _edje_object_part_unswallow(_p, _o) \
@@ -460,6 +492,7 @@ _solo_new(Term *term, Win *wn)
 
    term->container = tc;
 
+   DBG("solo tc:%p term:%p", tc, term);
    return tc;
 }
 
@@ -833,7 +866,6 @@ _win_swallow(Term_Container *tc, Term_Container *orig,
    Win *wn;
    Evas_Object *base;
    Evas_Object *o;
-   Evas_Coord x, y, w, h;
 
    assert (tc->type == TERM_CONTAINER_TYPE_WIN);
 
@@ -842,9 +874,14 @@ _win_swallow(Term_Container *tc, Term_Container *orig,
 
    DBG("tc:%p orig:%p new_child:%p", tc, orig, new_child);
 
-   o = edje_object_part_swallow_get(base, "terminology.content");
-   _edje_object_part_unswallow(base, o);
-   evas_object_geometry_get(o, &x, &y, &w, &h);
+   if (orig)
+     {
+        o = orig->get_evas_object(orig);
+        DBG("base:%p o:%p swallowed:%p", base, o,
+            edje_object_part_swallow_get(base, "terminology.content"));
+        assert(o == edje_object_part_swallow_get(base, "terminology.content"));
+        _edje_object_part_unswallow(base, o);
+     }
 
    o = new_child->get_evas_object(new_child);
    DBG("swallowing %p in %p", o, base);
@@ -949,10 +986,13 @@ _win_split(Term_Container *tc, Term_Container *child, const char *cmd,
    Term_Container *tc_split, *tc_solo_new;
    Win *wn;
    char buf[PATH_MAX], *wdir = NULL;
+   Evas_Object *base;
+   Evas_Object *o;
 
    assert (tc->type == TERM_CONTAINER_TYPE_WIN);
    wn = (Win*) tc;
 
+   tcdbg(tc);
    tm = tc->focused_term_get(tc);
    if (tm && termio_cwd_get(tm->termio, buf, sizeof(buf)))
      wdir = buf;
@@ -962,10 +1002,17 @@ _win_split(Term_Container *tc, Term_Container *child, const char *cmd,
    tc_solo_new = _solo_new(tm_new, wn);
    evas_object_data_set(tm_new->termio, "sizedone", tm_new->termio);
 
+   tcdbg(tc);
+
+   base = win_base_get(wn);
+   o = child->get_evas_object(child);
+   _edje_object_part_unswallow(base, o);
+
    tc_split = _split_new(child, tc_solo_new, is_horizontal);
 
    tc_split->is_focused = tc->is_focused;
-   tc->swallow(tc, child, tc_split);
+   tc->swallow(tc, NULL, tc_split);
+   tcdbg(tc);
 }
 
 static void
@@ -1075,6 +1122,8 @@ main_close(Evas_Object *win, Evas_Object *term)
    wn->terms = eina_list_remove(wn->terms, tm);
    tc = tm->container;
 
+   DBG(" ");
+   tcdbg(&wn->tc);
    DBG("tc:%p", tc);
    tc->close(tc, tc);
 
@@ -1245,15 +1294,21 @@ _split_swallow(Term_Container *tc, Term_Container *orig,
      split->last_focus = new_child;
 
    o = new_child->get_evas_object(new_child);
+   //edje_object_part_swallow_get(elm_layout_edje_get(split->panes), PANES_TOP);
+   //edje_object_part_swallow_get(elm_layout_edje_get(split->panes), PANES_BOTTOM);
    if (split->tc1 == orig)
      {
         elm_object_part_content_unset(split->panes, PANES_TOP);
+        assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                            "elm.swallow."PANES_TOP) == NULL);
         elm_object_part_content_set(split->panes, PANES_TOP, o);
         split->tc1 = new_child;
      }
    else
      {
         elm_object_part_content_unset(split->panes, PANES_BOTTOM);
+        assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                            "elm.swallow."PANES_BOTTOM) == NULL);
         elm_object_part_content_set(split->panes, PANES_BOTTOM, o);
         split->tc2 = new_child;
      }
@@ -1316,7 +1371,11 @@ _split_close(Term_Container *tc, Term_Container *child)
 
    Evas_Object *top, *bottom;
    top = elm_object_part_content_unset(split->panes, PANES_TOP);
+   assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                       "elm.swallow."PANES_TOP) == NULL);
    bottom = elm_object_part_content_unset(split->panes, PANES_BOTTOM);
+   assert(edje_object_part_swallow_get(elm_layout_edje_get(split->panes),
+                                       "elm.swallow."PANES_BOTTOM) == NULL);
    DBG("top:%p vs %p, bottom:%p vs %p",
        top, split->tc1->get_evas_object(split->tc1),
        bottom, split->tc2->get_evas_object(split->tc2));
@@ -1425,11 +1484,13 @@ _split_split(Term_Container *tc, Term_Container *child,
 {
    Term *tm_new, *tm;
    Term_Container *tc_split, *tc_solo_new;
+   Split *split;
    Win *wn;
    Evas_Object *obj_split;
    char buf[PATH_MAX], *wdir = NULL;
 
    assert (tc->type == TERM_CONTAINER_TYPE_SPLIT);
+   split = (Split *)tc;
    wn = tc->wn;
 
    tm = child->focused_term_get(child);
@@ -1441,6 +1502,11 @@ _split_split(Term_Container *tc, Term_Container *child,
    tc_solo_new = _solo_new(tm_new, wn);
    evas_object_data_set(tm_new->termio, "sizedone", tm_new->termio);
 
+   if (child == split->tc1)
+        elm_object_part_content_unset(split->panes, PANES_TOP);
+   else
+        elm_object_part_content_unset(split->panes, PANES_BOTTOM);
+
    tc_split = _split_new(child, tc_solo_new, is_horizontal);
 
    obj_split = tc_split->get_evas_object(tc_split);
@@ -1448,6 +1514,7 @@ _split_split(Term_Container *tc, Term_Container *child,
    tc_split->is_focused = tc->is_focused;
    tc->swallow(tc, child, tc_split);
 
+   tcdbg(tc);
    evas_object_show(obj_split);
 }
 
@@ -1533,6 +1600,7 @@ _size_job(void *data)
    if (info.req) evas_object_resize(wn->win, info.req_w, info.req_h);
 }
 
+/* TODO: to remove */
 void
 win_sizing_handle(Win *wn)
 {
@@ -3708,21 +3776,10 @@ _term_free(Term *term)
    term->termio = NULL;
 
    _edje_object_part_unswallow(term->bg, term->base);
-   DBG("del:%p (base:%p)", term->bg, term->base);
+   DBG("tc:%p del:%p (base:%p)", term->container, term->bg, term->base);
    evas_object_del(term->base);
    term->base = NULL;
    _DBG(term->wn);
-     {
-        const char *_part;
-        Eina_List *_l2, *_l;
-        Evas_Object *_o2;
-        _l = edje_object_access_part_list_get(term->bg);
-        DBG("len(l):%d", eina_list_count(_l));
-        EINA_LIST_FOREACH(_l, _l2, _part) {
-             _o2 = edje_object_part_swallow_get(term->bg, _part);
-             DBG("in %p: o:%p as %s", term->bg, _o2, _part);
-        }
-     }
    evas_object_del(term->bg);
    _DBG(term->wn);
    term->bg = NULL;
