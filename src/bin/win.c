@@ -2603,7 +2603,8 @@ _tabs_refresh(Tabs *tabs)
      {
         if (tabs->current == tab_item)
           {
-             snprintf(buf, sizeof(buf), "%i/%i", i, n);
+   	     solo = (Solo*)tab_item->tc;
+             snprintf(buf, sizeof(buf), "%s %i/%i", solo->tc.title, i, n);
              break;
           }
         i++;
